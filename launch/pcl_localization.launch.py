@@ -1,24 +1,58 @@
 import os
+import time
 
 import launch
 import launch.actions
 import launch.events
-
 import launch_ros
 import launch_ros.actions
-import launch_ros.events
-
 from launch import LaunchDescription
-from launch_ros.actions import LifecycleNode
-from launch_ros.actions import Node
-
+from launch_ros.actions import LifecycleNode, Node
+from launch.actions import EmitEvent, LogInfo, RegisterEventHandler
+from launch_ros.events.lifecycle import ChangeState
+from launch_ros.event_handlers import OnStateTransition
+from ament_index_python.packages import get_package_share_directory
 import lifecycle_msgs.msg
 
-from ament_index_python.packages import get_package_share_directory
+from lifecycle_msgs.msg import Transition
 
 def generate_launch_description():
+    # RViz配置檔案
+    rviz_config = os.path.join(
+        get_package_share_directory('pcl_localization_ros2'), 'rviz', 'localization.rviz')
 
-    ld = launch.LaunchDescription()
+    # 地圖文件路徑
+    map_file_path = os.path.join(
+        get_package_share_directory('pcl_localization_ros2'), 'maps', 'map.yaml')
+
+    # RViz節點
+    rviz_node = Node(
+        package='rviz2',
+        executable='rviz2',
+        name='rviz2',
+        output='screen',
+        arguments=['-d', rviz_config]
+    )
+
+    # 確認RViz啟動成功
+    rviz_start_checker = launch.actions.RegisterEventHandler(
+        launch.event_handlers.OnProcessStart(
+            target_action=rviz_node,
+            on_start=[
+                LogInfo(msg="RViz successfully started."),
+                LogInfo(msg="Proceeding with other nodes.")
+            ]
+        )
+    )
+
+    # 地圖服務節點
+    map_server_node = Node(
+        package='nav2_map_server',
+        executable='map_server',
+        name='map_server',
+        output='screen',
+        parameters=[{'yaml_filename': map_file_path}]
+    )
 
     lidar_tf = launch_ros.actions.Node(
         name='lidar_tf',
@@ -49,7 +83,47 @@ def generate_launch_description():
         parameters=[localization_param_dir],
         remappings=[('/cloud','/velodyne_points')],
         output='screen')
+    
+    # Lifecycle transitions
+    to_inactive = launch.actions.EmitEvent(
+        event=launch_ros.events.lifecycle.ChangeState(
+            lifecycle_node_matcher=launch.events.matches_action(pcl_localization),
+            transition_id=Transition.TRANSITION_CONFIGURE,  # Correct reference
+        )
+    )
 
+    from_unconfigured_to_inactive = launch.actions.RegisterEventHandler(
+        launch_ros.event_handlers.OnStateTransition(
+            target_lifecycle_node=pcl_localization,
+            goal_state='unconfigured',
+            entities=[
+                launch.actions.LogInfo(msg="-- Unconfigured --"),
+                launch.actions.EmitEvent(event=launch_ros.events.lifecycle.ChangeState(
+                    lifecycle_node_matcher=launch.events.matches_action(pcl_localization),
+                    transition_id=Transition.TRANSITION_CONFIGURE,  # Correct reference
+                )),
+            ],
+        )
+    )
+
+    from_inactive_to_active = launch.actions.RegisterEventHandler(
+        launch_ros.event_handlers.OnStateTransition(
+            target_lifecycle_node=pcl_localization,
+            start_state='configuring',
+            goal_state='inactive',
+            entities=[
+                launch.actions.LogInfo(msg="-- Inactive --"),
+                launch.actions.EmitEvent(event=launch_ros.events.lifecycle.ChangeState(
+                    lifecycle_node_matcher=launch.events.matches_action(pcl_localization),
+                    transition_id=Transition.TRANSITION_ACTIVATE,  # Correct reference
+                )),
+            ],
+        )
+    )
+
+
+    '''
+    # 配置生命周期節點狀態轉換
     to_inactive = launch.actions.EmitEvent(
         event=launch_ros.events.lifecycle.ChangeState(
             lifecycle_node_matcher=launch.events.matches_action(pcl_localization),
@@ -74,7 +148,7 @@ def generate_launch_description():
     from_inactive_to_active = launch.actions.RegisterEventHandler(
         launch_ros.event_handlers.OnStateTransition(
             target_lifecycle_node=pcl_localization,
-            start_state = 'configuring',
+            start_state='configuring',
             goal_state='inactive',
             entities=[
                 launch.actions.LogInfo(msg="-- Inactive --"),
@@ -85,7 +159,14 @@ def generate_launch_description():
             ],
         )
     )
-
+    '''
+    
+    # Launch描述
+    ld = LaunchDescription()
+    ld.add_action(rviz_node)
+    ld.add_action(rviz_start_checker)
+    time.sleep(1)
+    ld.add_action(map_server_node)
     ld.add_action(from_unconfigured_to_inactive)
     ld.add_action(from_inactive_to_active)
 

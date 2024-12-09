@@ -25,6 +25,7 @@ find_package(pcl_conversions REQUIRED)
 find_package(PCL REQUIRED)
 find_package(ndt_omp_ros2 REQUIRED)
 find_package(OpenMP)
+find_package(nav2_bringup REQUIRED)
 
 if (OPENMP_FOUND)
     set (CMAKE_C_FLAGS "${CMAKE_C_FLAGS} ${OpenMP_C_FLAGS}")
@@ -83,6 +84,8 @@ install(TARGETS
 install(DIRECTORY
   launch
   param
+  rviz
+  maps
   DESTINATION share/${PROJECT_NAME}/
 )
 
